@@ -3,7 +3,6 @@ import os
 import re
 import shutil
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -105,62 +104,38 @@ from PySide6.QtWidgets import (
 )
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
-
-VIP_URL = "https://vip.hobartservice.com/"
-
-SEARCH_BOX = "#ctl00_SearchBoxPlaceHolder_ItemIDTextBox"
-SEARCH_BUTTON = "#ctl00_SearchBoxPlaceHolder_SearchButton"
-
-ITEM_ID = "#ctl00_MainPlaceHolder_DataFormView_ItemIDDataLabel"
-DESCRIPTION = "#ctl00_MainPlaceHolder_DataFormView_ItemNameLabel"
-STOCK_STATUS = "#ctl00_MainPlaceHolder_DataFormView_CostQuartileLabel"
-LEAD_TIME = "#ctl00_MainPlaceHolder_DataFormView_LeadTimeLabel"
-INVENTORY_TABLE = "#ctl00_MainPlaceHolder_RadGrid1_ctl00 tbody tr"
-
-LOGIN_USERNAME = "#ctl00_MainPlaceHolder_LoginBox_UserName"
-LOGIN_PASSWORD = "#ctl00_MainPlaceHolder_LoginBox_Password"
-LOGIN_ORGANIZATION = "#ctl00_MainPlaceHolder_LoginBox_ddlDomain"
-LOGIN_BUTTON = "#ctl00_MainPlaceHolder_LoginBox_LoginButton"
-LOGIN_ERROR = "#ctl00_MainPlaceHolder_LoginBox_lblError"
-
-CREDENTIAL_SERVICE = "EPL Inventory Checker"
-CREDENTIAL_USERNAME_KEY = "vip_username"
-SETTINGS_ORGANIZATION_KEY = "login/organization"
-
-# Intentionally excludes obvious non-parts such as labor/travel codes.
-IGNORED_PREFIXES = (
-    "MN-SERVICE",
-    "MN-ZONE",
-    "LABOR",
-    "TRAVEL",
+from app.constants import (
+    CREDENTIAL_SERVICE,
+    CREDENTIAL_USERNAME_KEY,
+    DESCRIPTION,
+    IGNORED_PREFIXES,
+    INVENTORY_TABLE,
+    ITEM_ID,
+    LEAD_TIME,
+    LOGIN_BUTTON,
+    LOGIN_ERROR,
+    LOGIN_ORGANIZATION,
+    LOGIN_PASSWORD,
+    LOGIN_USERNAME,
+    PART_PATTERN,
+    SEARCH_BOX,
+    SEARCH_BUTTON,
+    SETTINGS_ORGANIZATION_KEY,
+    STOCK_STATUS,
+    VIP_URL,
+)
+from app.formatting import (
+    canonical_duplicate_key,
+    format_hobart_part_number,
+    normalize_part_number,
+)
+from app.models import (
+    AlternateStockLocation,
+    PartInput,
+    PartResult,
+    ReviewCandidate,
 )
 
-# Covers examples such as:
-# 948741-00002, 067500-00034, 942185, FE022-29,
-# SC-11687, SC021-07, NS046-33, PB002-26.
-PART_PATTERN = re.compile(
-    r"\b(?:"
-    r"\d{5,7}(?:-\d{2,5})?"
-    r"|[A-Z]{1,4}-?\d{2,6}(?:-\d{2,5})?"
-    r")\b",
-    re.IGNORECASE,
-)
-
-
-@dataclass
-class PartInput:
-    display_number: str
-    normalized_number: str
-    source: str
-
-
-@dataclass
-class ReviewCandidate:
-    part_number: str
-    source: str
-    description: str = ""
-    quantity: str = ""
-    confidence: str = "High"
 
 
 def extract_typed_quote_candidates(text: str, source: str) -> list[ReviewCandidate]:
@@ -239,74 +214,6 @@ def extract_ocr_candidates(text: str, source: str) -> list[ReviewCandidate]:
             )
 
     return candidates
-
-
-@dataclass
-class AlternateStockLocation:
-    location_type: str
-    site_code: str
-    site_name: str
-    warehouse: str
-    available: int
-
-
-@dataclass
-class PartResult:
-    requested_part: str
-    item_id: str = ""
-    description: str = ""
-    stock_status: str = ""
-    lead_time: str = ""
-    piqua_available: str = ""
-    piqua_open_po: str = ""
-    alternate_stock: list[AlternateStockLocation] = None
-    error: str = ""
-
-    def __post_init__(self) -> None:
-        if self.alternate_stock is None:
-            self.alternate_stock = []
-
-
-def format_hobart_part_number(value: str) -> str:
-    """Return the canonical Hobart EPL search format for a part number."""
-    cleaned = value.strip().upper()
-    cleaned = cleaned.replace("–", "-").replace("—", "-")
-    cleaned = re.sub(r"\s+", "", cleaned)
-    cleaned = cleaned.strip(".,;:()[]{}")
-
-    if not cleaned:
-        return ""
-
-    # Existing numeric prefixes such as 00- or 01- are already meaningful.
-    if re.match(r"^\d{2}-", cleaned):
-        return cleaned
-
-    # Rebuild two-letter parts into AA-###-##.
-    # Four-digit variants are padded in the middle group:
-    # FE22-29 -> FE-022-29.
-    alpha_match = re.fullmatch(r"([A-Z]{2})-?(\d{2,3})-?(\d{2})", cleaned)
-    if alpha_match:
-        prefix, middle, suffix = alpha_match.groups()
-        return f"{prefix}-{middle.zfill(3)}-{suffix}"
-
-    # Standard numeric Hobart parts receive the 00- prefix.
-    if cleaned[0].isdigit():
-        return f"00-{cleaned}"
-
-    # Preserve unknown formats rather than guessing.
-    return cleaned
-
-
-def normalize_part_number(value: str) -> str:
-    """Backward-compatible wrapper used throughout the application."""
-    return format_hobart_part_number(value)
-
-
-def canonical_duplicate_key(value: str) -> str:
-    normalized = normalize_part_number(value)
-    if normalized.startswith("00-"):
-        normalized = normalized[3:]
-    return re.sub(r"[^A-Z0-9]", "", normalized.upper())
 
 
 def extract_parts_from_text(text: str, source: str) -> list[PartInput]:
