@@ -1,0 +1,7 @@
+PySide6
+playwright
+pdfplumber
+keyring
+PyMuPDF
+Pillow
+pytesseract
