@@ -165,8 +165,25 @@ class EPLBatchWorker(QObject):
                     const cells = Array.from(row.querySelectorAll('td'));
                     if (cells.length < 8) return null;
 
-                    const colorElement = cells[0] || row;
-                    const rowColor = getComputedStyle(colorElement).backgroundColor || '';
+                    const isTransparent = color =>
+                        !color ||
+                        color === 'transparent' ||
+                        color === 'rgba(0, 0, 0, 0)';
+
+                    const candidateElements = [
+                        cells[0],
+                        row,
+                        row.parentElement
+                    ].filter(Boolean);
+
+                    let rowColor = '';
+                    for (const element of candidateElements) {
+                        const color = getComputedStyle(element).backgroundColor || '';
+                        if (!isTransparent(color)) {
+                            rowColor = color;
+                            break;
+                        }
+                    }
 
                     return {
                         site_code: cells[0].innerText.trim(),
@@ -174,7 +191,8 @@ class EPLBatchWorker(QObject):
                         warehouse: cells[2].innerText.trim(),
                         available_text: cells[3].innerText.trim(),
                         open_po_text: cells[7].innerText.trim(),
-                        row_color: rowColor
+                        row_color: rowColor,
+                        row_class: row.className || ''
                     };
                 }).filter(Boolean)"""
             )
@@ -234,25 +252,37 @@ class EPLBatchWorker(QObject):
 
     @staticmethod
     def classify_inventory_row(color: str) -> str:
-        """Classify EPL's colored inventory rows.
+        """Classify EPL inventory rows from their effective background color.
 
-        Red rows represent Hobart branches. Dark-gray rows represent service
-        contractors. Light-gray warehouse detail rows are intentionally ignored.
+        Red rows are Hobart branches, dark-gray rows are service contractors,
+        and light-gray rows are technician trucks. Transparent/unknown colors
+        are ignored rather than guessed.
         """
-        numbers = [int(value) for value in re.findall(r"\d+", color or "")[:3]]
+        normalized = (color or "").strip().lower()
+        if not normalized or normalized in {
+            "transparent",
+            "rgba(0, 0, 0, 0)",
+        }:
+            return ""
+
+        numbers = [int(value) for value in re.findall(r"\d+", normalized)[:3]]
         if len(numbers) != 3:
             return ""
 
         red, green, blue = numbers
-
-        if red >= 90 and red > green * 1.35 and red > blue * 1.35:
-            return "Hobart Branch"
-
         brightness = (red + green + blue) / 3
         channel_spread = max(numbers) - min(numbers)
-        if brightness <= 125 and channel_spread <= 45:
+
+        # EPL branch rows are a clearly red shade.
+        if red >= 90 and red >= green * 1.5 and red >= blue * 1.5:
+            return "Hobart Branch"
+
+        # EPL service-contractor rows are neutral dark gray. Exclude near-black
+        # values because those usually indicate a failed/transparent lookup.
+        if 30 <= brightness <= 110 and channel_spread <= 25:
             return "Service Contractor"
 
+        # Light-gray technician-truck rows and all unknown colors are ignored.
         return ""
 
     @staticmethod
