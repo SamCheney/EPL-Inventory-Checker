@@ -1,22 +1,23 @@
-EPL Inventory Checker v0.5.2
+EPL Inventory Checker v0.5.3
 ============================
 
-True stockout highlighting
---------------------------
+Automatic Tesseract detection
+-----------------------------
 
-A result row is highlighted light red when:
+The program now automatically searches for Tesseract OCR in:
 
-- Piqua Available Physical is zero or negative, and
-- no Hobart branch or service contractor has positive Available Physical stock.
+- The Windows PATH
+- C:\Program Files\Tesseract-OCR\tesseract.exe
+- C:\Program Files (x86)\Tesseract-OCR\tesseract.exe
+- The user's Local AppData Programs folder
+- A Tesseract-OCR folder beside the application
 
-The Alternate Stock column displays "OUT OF STOCK".
+Users no longer need to manually add Tesseract to the Windows PATH.
+They only need to install Tesseract using its normal Windows installer.
 
-Parts that have alternate inventory still show the View Locations button
-and are not highlighted red.
+Install this update
+-------------------
 
-Install
--------
-
-Replace main.py in the existing project folder, then run:
+Replace main.py in the project folder, then run:
 
     python main.py

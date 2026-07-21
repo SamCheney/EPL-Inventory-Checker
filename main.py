@@ -1,6 +1,7 @@
 
 import os
 import re
+import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,62 @@ try:
 except ImportError:
     pytesseract = None
     Image = None
+
+
+def configure_tesseract() -> Optional[Path]:
+    """Find Tesseract automatically and configure pytesseract.
+
+    Checks the Windows PATH, standard installer folders, and a bundled
+    Tesseract-OCR folder beside the application for future portable builds.
+    """
+    if pytesseract is None:
+        return None
+
+    candidates: list[Path] = []
+
+    path_match = shutil.which("tesseract")
+    if path_match:
+        candidates.append(Path(path_match))
+
+    app_directory = (
+        Path(sys.executable).resolve().parent
+        if getattr(sys, "frozen", False)
+        else Path(__file__).resolve().parent
+    )
+
+    candidates.extend(
+        [
+            app_directory / "Tesseract-OCR" / "tesseract.exe",
+            app_directory / "tesseract.exe",
+            Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+            / "Tesseract-OCR"
+            / "tesseract.exe",
+            Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
+            / "Tesseract-OCR"
+            / "tesseract.exe",
+            Path(os.environ.get("LOCALAPPDATA", ""))
+            / "Programs"
+            / "Tesseract-OCR"
+            / "tesseract.exe",
+        ]
+    )
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        candidate_text = str(candidate)
+        if not candidate_text or candidate_text in seen:
+            continue
+        seen.add(candidate_text)
+
+        if candidate.is_file():
+            pytesseract.pytesseract.tesseract_cmd = candidate_text
+            return candidate
+
+    return None
+
+
+TESSERACT_PATH = configure_tesseract()
+
 from PySide6.QtCore import QObject, QSettings, QThread, Qt, Signal
 from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWidgets import (
@@ -817,7 +874,7 @@ class LoginDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("EPL Inventory Checker v0.5.2")
+        self.setWindowTitle("EPL Inventory Checker v0.5.3")
         self.resize(1150, 720)
 
         self.parts_by_key: dict[str, PartInput] = {}
@@ -1063,6 +1120,8 @@ class MainWindow(QMainWindow):
         )
 
     def run_local_ocr(self, path: Path) -> list[ReviewCandidate]:
+        global TESSERACT_PATH
+
         if pytesseract is None or Image is None or fitz is None:
             QMessageBox.warning(
                 self,
@@ -1073,6 +1132,24 @@ class MainWindow(QMainWindow):
                     "pip install pytesseract pillow pymupdf\n\n"
                     "You must also install the free Tesseract OCR program for Windows. "
                     "The review viewer will still open so you can enter or correct parts manually."
+                ),
+            )
+            return []
+
+        # Retry detection in case Tesseract was installed after the app started.
+        TESSERACT_PATH = configure_tesseract()
+        if TESSERACT_PATH is None:
+            QMessageBox.warning(
+                self,
+                "Tesseract OCR Not Found",
+                (
+                    "The Python OCR packages are installed, but the Windows "
+                    "Tesseract OCR engine could not be found.\n\n"
+                    "Install Tesseract in its normal location:\n"
+                    "C:\\Program Files\\Tesseract-OCR\\tesseract.exe\n\n"
+                    "You do not need to add it to PATH. After installation, "
+                    "restart the app and try again. The review window will still "
+                    "open so parts can be entered manually."
                 ),
             )
             return []
@@ -1114,8 +1191,9 @@ class MainWindow(QMainWindow):
                 (
                     "The Python OCR package is installed, but the Tesseract OCR program "
                     "was not found on Windows.\n\n"
-                    "Install Tesseract, restart the app, and try again. "
-                    "The review viewer will still open for manual entry."
+                    "Install Tesseract in C:\\Program Files\\Tesseract-OCR, "
+                    "restart the app, and try again. You do not need to add it "
+                    "to PATH. The review viewer will still open for manual entry."
                 ),
             )
             return []
