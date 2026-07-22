@@ -4,17 +4,6 @@ import re
 
 import keyring
 
-import sys
-from pathlib import Path
-
-if getattr(sys, "frozen", False):
-    # Packaged/installed application
-    browser_path = Path(sys.executable).resolve().parent / "ms-playwright"
-else:
-    # Normal development environment
-    browser_path = Path(os.environ["LOCALAPPDATA"]) / "ms-playwright"
-
-os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(browser_path)
 from PySide6.QtCore import QObject, Signal
 from playwright.sync_api import (
     TimeoutError as PlaywrightTimeoutError,
