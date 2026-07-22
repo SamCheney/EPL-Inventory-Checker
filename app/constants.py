@@ -3,7 +3,7 @@ import re
 VIP_URL = "https://vip.hobartservice.com/"
 
 APP_NAME = "EPL INVENTORY CHECKER"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 
 SEARCH_BOX = "#ctl00_SearchBoxPlaceHolder_ItemIDTextBox"
 SEARCH_BUTTON = "#ctl00_SearchBoxPlaceHolder_SearchButton"
