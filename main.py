@@ -9,6 +9,7 @@ def main() -> None:
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
+    window.check_for_updates()
     sys.exit(app.exec())
 
 

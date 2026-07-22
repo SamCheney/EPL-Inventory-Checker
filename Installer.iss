@@ -3,7 +3,7 @@
 ; Non-commercial use only
 
 #define MyAppName "EPL Inventory Checker"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.1"
 #define MyAppPublisher "Sam Cheney"
 #define MyAppExeName "EPL Inventory Checker.exe"
 
@@ -28,8 +28,8 @@ ArchitecturesInstallIn64BitMode=x64compatible
 DisableProgramGroupPage=yes
 ; Uncomment the following line to run in non administrative install mode (install for current user only).
 ;PrivilegesRequired=lowest
-OutputDir=C:\Users\samja\OneDrive\Desktop\EPL-Inventory-Checker\Installer
-OutputBaseFilename=EPL Inventory Checker Setup
+OutputDir=C:\Users\hobar\OneDrive\Desktop\EPL-Inventory-Checker\Installer
+OutputBaseFilename=EPL-Inventory-Checker-Setup-v{#MyAppVersion}
 SolidCompression=yes
 WizardStyle=modern dark
 
@@ -40,8 +40,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "C:\Users\samja\OneDrive\Desktop\EPL-Inventory-Checker\dist\EPL Inventory Checker\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "C:\Users\samja\OneDrive\Desktop\EPL-Inventory-Checker\dist\EPL Inventory Checker\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "C:\Users\hobar\OneDrive\Desktop\EPL-Inventory-Checker\dist\EPL Inventory Checker\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "C:\Users\hobar\OneDrive\Desktop\EPL-Inventory-Checker\dist\EPL Inventory Checker\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
 [Icons]

@@ -3,7 +3,7 @@ import re
 VIP_URL = "https://vip.hobartservice.com/"
 
 APP_NAME = "EPL INVENTORY CHECKER"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 
 SEARCH_BOX = "#ctl00_SearchBoxPlaceHolder_ItemIDTextBox"
 SEARCH_BUTTON = "#ctl00_SearchBoxPlaceHolder_SearchButton"
@@ -33,9 +33,10 @@ IGNORED_PREFIXES = (
 )
 
 PART_PATTERN = re.compile(
-    r"\b(?:"
-    r"\d{5,7}(?:-\d{2,5})?"
-    r"|[A-Z]{1,4}-?\d{2,6}(?:-\d{2,5})?"
-    r")\b",
+    r"(?<![A-Z0-9-])(?:"
+    r"(?:00|01|EW)-?[A-Z0-9]{6}(?:-?[A-Z0-9]{5})?"
+    r"|(?!EW)[A-Z]{2}-?\d{3}-?\d{2}"
+    r"|[A-Z0-9]{6}(?:-?[A-Z0-9]{5})?"
+    r")(?![A-Z0-9-])",
     re.IGNORECASE,
 )

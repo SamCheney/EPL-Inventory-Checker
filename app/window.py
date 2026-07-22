@@ -1,5 +1,9 @@
+import subprocess
+
 from pathlib import Path
 from typing import Optional
+
+from app.updater import UpdateChecker
 
 from app.constants import APP_NAME, APP_VERSION
 
@@ -8,6 +12,7 @@ from PySide6.QtCore import QSettings, QThread, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QDialog,
+    QApplication,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -439,3 +444,62 @@ class MainWindow(QMainWindow):
         self.search_all_button.setEnabled(enabled)
         self.save_login_button.setEnabled(enabled)
         self.forget_login_button.setEnabled(enabled)
+
+    def check_for_updates(self) -> None:
+        update_checker = UpdateChecker()
+        update = update_checker.check()
+
+        if update is None:
+            return
+
+        message_box = QMessageBox(self)
+        message_box.setWindowTitle("Update Available")
+        message_box.setIcon(QMessageBox.Information)
+        message_box.setText(
+            f"A new version ({update.latest_version}) is available."
+        )
+        message_box.setInformativeText(
+            "Would you like to download and install it now?"
+        )
+
+        install_button = message_box.addButton(
+            "Download and Install",
+            QMessageBox.AcceptRole,
+        )
+        message_box.addButton("Later", QMessageBox.RejectRole)
+
+        message_box.exec()
+
+        if message_box.clickedButton() != install_button:
+            return
+
+        try:
+            self.status_label.setText("Downloading update...")
+
+            installer_path = update_checker.download_installer(
+                update.download_url,
+                update.latest_version
+            )
+            
+            subprocess.Popen(
+                [
+                    "cmd",
+                    "/c",
+                    (
+                        'timeout /t 1 /nobreak > nul '
+                        f'& start "" "{installer_path}"'
+                    ),
+                ],
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+
+            QApplication.quit()
+
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Update Failed",
+                f"The update could not be downloaded or opened.\n\n{exc}",
+            )
+            self.status_label.setText("Update failed.")
+        

@@ -11,17 +11,62 @@ def format_hobart_part_number(value: str) -> str:
     if not cleaned:
         return ""
 
-    if re.match(r"^\d{2}-", cleaned):
-        return cleaned
+    # Format 3:
+    # XX-XXX-XX
+    #
+    # The prefix must be two letters, but cannot be EW.
+    # Accepts both SC-048-35 and SC048-35.
+    short_match = re.fullmatch(
+        r"([A-Z]{2})-?(\d{3})-?(\d{2})",
+        cleaned,
+    )
 
-    alpha_match = re.fullmatch(r"([A-Z]{2})-?(\d{2,3})-?(\d{2})", cleaned)
-    if alpha_match:
-        prefix, middle, suffix = alpha_match.groups()
-        return f"{prefix}-{middle.zfill(3)}-{suffix}"
+    if short_match:
+        prefix, middle, suffix = short_match.groups()
 
-    if cleaned[0].isdigit():
-        return f"00-{cleaned}"
+        if prefix != "EW":
+            return f"{prefix}-{middle}-{suffix}"
 
+    # Formats 1 and 2:
+    # XX-XXXXXX
+    # XX-XXXXXX-XXXXX
+    #
+    # These formats may only use 00, 01, or EW as their prefix.
+    # Hyphens may be missing in manually entered values.
+    long_match = re.fullmatch(
+        r"(00|01|EW)-?([A-Z0-9]{6})(?:-?([A-Z0-9]{5}))?",
+        cleaned,
+    )
+
+    if long_match:
+        prefix, middle, suffix = long_match.groups()
+
+        if suffix:
+            return f"{prefix}-{middle}-{suffix}"
+
+        return f"{prefix}-{middle}"
+
+    # No prefix supplied:
+    # Add the default 00 prefix.
+    #
+    # Examples:
+    # 123456       -> 00-123456
+    # 1000V8-00115 -> 00-1000V8-00115
+    unprefixed_match = re.fullmatch(
+        r"([A-Z0-9]{6})(?:-?([A-Z0-9]{5}))?",
+        cleaned,
+    )
+
+    if unprefixed_match:
+        middle, suffix = unprefixed_match.groups()
+
+        if suffix:
+            return f"00-{middle}-{suffix}"
+
+        return f"00-{middle}"
+
+    # Return the cleaned value unchanged when it does not match
+    # one of the three recognized Hobart formats.
     return cleaned
 
 
