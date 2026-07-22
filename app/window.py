@@ -1,6 +1,8 @@
 from pathlib import Path
 from typing import Optional
 
+from app.constants import APP_NAME, APP_VERSION
+
 import keyring
 from PySide6.QtCore import QSettings, QThread, Qt
 from PySide6.QtGui import QColor
@@ -43,7 +45,7 @@ from app.vip import EPLBatchWorker
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("EPL Inventory Checker v0.5.3")
+        self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
         self.resize(1150, 720)
 
         self.parts_by_key: dict[str, PartInput] = {}
@@ -85,10 +87,12 @@ class MainWindow(QMainWindow):
         self.progress.setValue(0)
         self.status_label = QLabel("Ready")
 
-        self.results_table = QTableWidget(0, 8)
+        self.results_table = QTableWidget(0, 10)
         self.results_table.setHorizontalHeaderLabels(
             [
+                "Status",
                 "Requested Part",
+                "Current Part",
                 "EPL Item ID",
                 "Description",
                 "Stock Status",
@@ -98,6 +102,7 @@ class MainWindow(QMainWindow):
                 "Alternate Stock",
             ]
         )
+        self.results_table.setColumnWidth(0, 45)
         self.results_table.horizontalHeader().setStretchLastSection(True)
 
         input_buttons = QHBoxLayout()
@@ -345,8 +350,25 @@ class MainWindow(QMainWindow):
         row = self.results_table.rowCount()
         self.results_table.insertRow(row)
 
+        is_superseded = (
+            result.current_part
+            and EPLBatchWorker._part_key(result.requested_part)
+            != EPLBatchWorker._part_key(result.current_part)
+        )
+
+        status_item = QTableWidgetItem("SUP" if is_superseded else "✓")
+        status_item.setTextAlignment(Qt.AlignCenter)
+        font = status_item.font()
+        font.setBold(True)
+        status_item.setFont(font)
+        status_item.setForeground(
+            QColor(220, 0, 0) if is_superseded else QColor(0, 150, 0)
+        )
+        self.results_table.setItem(row, 0, status_item)
+
         values = [
             result.requested_part,
+            result.current_part or result.item_id or result.requested_part,
             result.item_id,
             result.description,
             result.stock_status,
@@ -355,9 +377,9 @@ class MainWindow(QMainWindow):
             result.piqua_open_po,
         ]
 
-        for column, value in enumerate(values):
+        for column, value in enumerate(values, start=1):
             item = QTableWidgetItem(value)
-            if result.error and column == 2:
+            if result.error and column == 4:
                 item.setText(f"ERROR: {result.error}")
             self.results_table.setItem(row, column, item)
 
@@ -377,7 +399,7 @@ class MainWindow(QMainWindow):
                 lambda checked=False, current_result=result:
                     self.show_alternate_stock(current_result)
             )
-            self.results_table.setCellWidget(row, 7, button)
+            self.results_table.setCellWidget(row, 9, button)
 
         elif piqua_quantity <= 0 and not result.error:
             out_of_stock_item = QTableWidgetItem("OUT OF STOCK")
@@ -385,10 +407,10 @@ class MainWindow(QMainWindow):
                 "Piqua has zero or negative stock and no other qualifying "
                 "location shows positive Available Physical inventory."
             )
-            self.results_table.setItem(row, 7, out_of_stock_item)
+            self.results_table.setItem(row, 9, out_of_stock_item)
 
             out_of_stock_background = QColor(255, 205, 205)
-            for column in range(self.results_table.columnCount()):
+            for column in range(1, self.results_table.columnCount()):
                 item = self.results_table.item(row, column)
                 if item is None:
                     item = QTableWidgetItem("")
@@ -396,7 +418,7 @@ class MainWindow(QMainWindow):
                 item.setBackground(out_of_stock_background)
 
         else:
-            self.results_table.setItem(row, 7, QTableWidgetItem("Piqua stocked"))
+            self.results_table.setItem(row, 9, QTableWidgetItem("Piqua stocked"))
 
     def show_alternate_stock(self, result: PartResult) -> None:
         dialog = AlternateStockDialog(

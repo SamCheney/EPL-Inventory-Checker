@@ -19,6 +19,7 @@ from app.constants import (
     LOGIN_ORGANIZATION,
     LOGIN_PASSWORD,
     LOGIN_USERNAME,
+    REPLACED_BY,
     SEARCH_BOX,
     SEARCH_BUTTON,
     STOCK_STATUS,
@@ -32,6 +33,8 @@ class EPLBatchWorker(QObject):
     progress = Signal(int, int)
     result_ready = Signal(object)
     finished = Signal()
+
+    MAX_SUPERSESSION_HOPS = 10
 
     def __init__(self, parts: list[str], organization: str):
         super().__init__()
@@ -48,13 +51,15 @@ class EPLBatchWorker(QObject):
 
                 if page.locator(LOGIN_USERNAME).count():
                     if self._auto_login(page):
-                        self.status.emit("Signed into VIP. Opening Enterprise Parts Locator...")
+                        self.status.emit(
+                            "Signed into VIP. Opening Enterprise Parts Locator..."
+                        )
                     else:
                         self.status.emit(
-                            "No saved login was found. Sign in manually; the program will continue afterward."
+                            "No saved login was found. Sign in manually; "
+                            "the program will continue afterward."
                         )
 
-                # Wait until either EPL is already open or the banner link is available.
                 try:
                     page.locator(SEARCH_BOX).wait_for(state="visible", timeout=5_000)
                 except PlaywrightTimeoutError:
@@ -97,7 +102,6 @@ class EPLBatchWorker(QObject):
         except PlaywrightTimeoutError:
             pass
 
-        # A visible login error means credentials or organization were rejected.
         if page.locator(LOGIN_ERROR).count():
             error_text = page.locator(LOGIN_ERROR).first.inner_text().strip()
             if error_text:
@@ -106,144 +110,192 @@ class EPLBatchWorker(QObject):
         return True
 
     def _open_epl_after_login(self, page) -> None:
-        # Give the user time to complete login, then click the EPL banner.
         try:
             link = page.get_by_text("Enterprise Parts Locator", exact=True)
             link.wait_for(state="visible", timeout=300_000)
             link.click()
         except PlaywrightTimeoutError:
-            # Manual navigation remains a fallback.
             self.status.emit(
                 "After logging in, click Enterprise Parts Locator in the top banner."
             )
 
     def lookup_part(self, page, part: str) -> PartResult:
         result = PartResult(requested_part=part)
+        current_part = part
+        visited: set[str] = set()
 
         try:
-            search_box = page.locator(SEARCH_BOX)
-            search_box.fill(part)
+            for hop in range(self.MAX_SUPERSESSION_HOPS + 1):
+                normalized_key = self._part_key(current_part)
 
-            old_item = ""
-            if page.locator(ITEM_ID).count():
-                old_item = page.locator(ITEM_ID).first.inner_text().strip()
+                if normalized_key in visited:
+                    raise RuntimeError(
+                        "EPL returned a circular supersession chain while checking "
+                        f"{current_part}."
+                    )
+                visited.add(normalized_key)
 
-            page.locator(SEARCH_BUTTON).click()
+                if hop > 0:
+                    self.status.emit(
+                        f"{part} was replaced by {current_part}. "
+                        "Checking the current part..."
+                    )
 
-            # ASP.NET may perform a full postback or update the current DOM.
+                self._search_part_page(page, current_part)
+
+                displayed_item = self.safe_text(page, ITEM_ID)
+                replacement = self.safe_text(page, REPLACED_BY)
+
+                if displayed_item:
+                    current_part = displayed_item
+
+                if replacement:
+                    replacement_key = self._part_key(replacement)
+                    if replacement_key in visited:
+                        raise RuntimeError(
+                            "EPL returned a circular supersession chain involving "
+                            f"{replacement}."
+                        )
+
+                    result.supersession_chain.append(replacement)
+                    current_part = replacement
+                    continue
+
+                result.current_part = current_part
+                result.item_id = displayed_item or current_part
+                result.description = self.safe_text(page, DESCRIPTION)
+                result.stock_status = self.safe_text(page, STOCK_STATUS)
+                result.lead_time = self.safe_text(page, LEAD_TIME)
+
+                self._read_inventory(page, result)
+                return result
+
+            raise RuntimeError(
+                "The supersession chain exceeded "
+                f"{self.MAX_SUPERSESSION_HOPS} replacements."
+            )
+
+        except Exception as exc:
+            result.current_part = current_part
+            result.error = str(exc)
+            return result
+
+    def _search_part_page(self, page, part: str) -> None:
+        search_box = page.locator(SEARCH_BOX)
+
+        old_item = ""
+        if page.locator(ITEM_ID).count():
+            old_item = page.locator(ITEM_ID).first.inner_text().strip()
+
+        search_box.fill(part)
+        page.locator(SEARCH_BUTTON).click()
+
+        try:
+            page.wait_for_load_state("domcontentloaded", timeout=20_000)
+        except PlaywrightTimeoutError:
+            pass
+
+        page.locator(ITEM_ID).wait_for(state="visible", timeout=60_000)
+
+        if old_item:
             try:
-                page.wait_for_load_state("domcontentloaded", timeout=20_000)
+                page.wait_for_function(
+                    """({selector, oldValue}) => {
+                        const el = document.querySelector(selector);
+                        return el && el.textContent.trim() !== oldValue;
+                    }""",
+                    arg={"selector": ITEM_ID, "oldValue": old_item},
+                    timeout=15_000,
+                )
             except PlaywrightTimeoutError:
                 pass
 
-            page.locator(ITEM_ID).wait_for(state="visible", timeout=60_000)
+    def _read_inventory(self, page, result: PartResult) -> None:
+        inventory_rows = page.locator(INVENTORY_TABLE).evaluate_all(
+            """rows => rows.map(row => {
+                const cells = Array.from(row.querySelectorAll('td'));
+                if (cells.length < 8) return null;
 
-            # Wait for the displayed item to change when possible.
-            if old_item:
-                try:
-                    page.wait_for_function(
-                        """({selector, oldValue}) => {
-                            const el = document.querySelector(selector);
-                            return el && el.textContent.trim() !== oldValue;
-                        }""",
-                        arg={"selector": ITEM_ID, "oldValue": old_item},
-                        timeout=15_000,
-                    )
-                except PlaywrightTimeoutError:
-                    pass
+                const isTransparent = color =>
+                    !color ||
+                    color === 'transparent' ||
+                    color === 'rgba(0, 0, 0, 0)';
 
-            result.item_id = self.safe_text(page, ITEM_ID)
-            result.description = self.safe_text(page, DESCRIPTION)
-            result.stock_status = self.safe_text(page, STOCK_STATUS)
-            result.lead_time = self.safe_text(page, LEAD_TIME)
+                const candidateElements = [
+                    cells[0],
+                    row,
+                    row.parentElement
+                ].filter(Boolean);
 
-            # Read the whole inventory table in one browser-to-Python transfer.
-            # The previous version made several Playwright calls for every row,
-            # which became very slow on large EPL inventory tables.
-            inventory_rows = page.locator(INVENTORY_TABLE).evaluate_all(
-                """rows => rows.map(row => {
-                    const cells = Array.from(row.querySelectorAll('td'));
-                    if (cells.length < 8) return null;
-
-                    const isTransparent = color =>
-                        !color ||
-                        color === 'transparent' ||
-                        color === 'rgba(0, 0, 0, 0)';
-
-                    const candidateElements = [
-                        cells[0],
-                        row,
-                        row.parentElement
-                    ].filter(Boolean);
-
-                    let rowColor = '';
-                    for (const element of candidateElements) {
-                        const color = getComputedStyle(element).backgroundColor || '';
-                        if (!isTransparent(color)) {
-                            rowColor = color;
-                            break;
-                        }
+                let rowColor = '';
+                for (const element of candidateElements) {
+                    const color = getComputedStyle(element).backgroundColor || '';
+                    if (!isTransparent(color)) {
+                        rowColor = color;
+                        break;
                     }
+                }
 
-                    return {
-                        site_code: cells[0].innerText.trim(),
-                        site_name: cells[1].innerText.trim(),
-                        warehouse: cells[2].innerText.trim(),
-                        available_text: cells[3].innerText.trim(),
-                        open_po_text: cells[7].innerText.trim(),
-                        row_color: rowColor,
-                        row_class: row.className || ''
-                    };
-                }).filter(Boolean)"""
+                return {
+                    site_code: cells[0].innerText.trim(),
+                    site_name: cells[1].innerText.trim(),
+                    warehouse: cells[2].innerText.trim(),
+                    available_text: cells[3].innerText.trim(),
+                    open_po_text: cells[7].innerText.trim(),
+                    row_color: rowColor,
+                    row_class: row.className || ''
+                };
+            }).filter(Boolean)"""
+        )
+
+        for inventory_row in inventory_rows:
+            if inventory_row["site_name"].lower() == "piqua":
+                result.piqua_available = inventory_row["available_text"]
+                result.piqua_open_po = inventory_row["open_po_text"]
+                break
+
+        piqua_quantity = self.parse_inventory_quantity(result.piqua_available)
+        if piqua_quantity > 0:
+            return
+
+        for inventory_row in inventory_rows:
+            site_name = inventory_row["site_name"]
+            if site_name.lower() == "piqua":
+                continue
+
+            available = self.parse_inventory_quantity(
+                inventory_row["available_text"]
+            )
+            if available <= 0:
+                continue
+
+            location_type = self.classify_inventory_row(
+                inventory_row["row_color"]
+            )
+            if not location_type:
+                continue
+
+            result.alternate_stock.append(
+                AlternateStockLocation(
+                    location_type=location_type,
+                    site_code=inventory_row["site_code"],
+                    site_name=site_name,
+                    warehouse=inventory_row["warehouse"],
+                    available=available,
+                )
             )
 
-            for inventory_row in inventory_rows:
-                if inventory_row["site_name"].lower() == "piqua":
-                    result.piqua_available = inventory_row["available_text"]
-                    result.piqua_open_po = inventory_row["open_po_text"]
-                    break
+        result.alternate_stock.sort(
+            key=lambda location: (
+                0 if location.location_type == "Hobart Branch" else 1,
+                -location.available,
+                location.site_name,
+            )
+        )
 
-            piqua_quantity = self.parse_inventory_quantity(result.piqua_available)
-            if piqua_quantity <= 0:
-                for inventory_row in inventory_rows:
-                    site_name = inventory_row["site_name"]
-                    if site_name.lower() == "piqua":
-                        continue
-
-                    available = self.parse_inventory_quantity(
-                        inventory_row["available_text"]
-                    )
-                    if available <= 0:
-                        continue
-
-                    location_type = self.classify_inventory_row(
-                        inventory_row["row_color"]
-                    )
-                    if not location_type:
-                        continue
-
-                    result.alternate_stock.append(
-                        AlternateStockLocation(
-                            location_type=location_type,
-                            site_code=inventory_row["site_code"],
-                            site_name=site_name,
-                            warehouse=inventory_row["warehouse"],
-                            available=available,
-                        )
-                    )
-
-                result.alternate_stock.sort(
-                    key=lambda location: (
-                        0 if location.location_type == "Hobart Branch" else 1,
-                        -location.available,
-                        location.site_name,
-                    )
-                )
-
-        except Exception as exc:
-            result.error = str(exc)
-
-        return result
+    @staticmethod
+    def _part_key(value: str) -> str:
+        return re.sub(r"[^A-Z0-9]", "", (value or "").upper())
 
     @staticmethod
     def parse_inventory_quantity(value: str) -> int:
@@ -252,12 +304,6 @@ class EPLBatchWorker(QObject):
 
     @staticmethod
     def classify_inventory_row(color: str) -> str:
-        """Classify EPL inventory rows from their effective background color.
-
-        Red rows are Hobart branches, dark-gray rows are service contractors,
-        and light-gray rows are technician trucks. Transparent/unknown colors
-        are ignored rather than guessed.
-        """
         normalized = (color or "").strip().lower()
         if not normalized or normalized in {
             "transparent",
@@ -273,16 +319,12 @@ class EPLBatchWorker(QObject):
         brightness = (red + green + blue) / 3
         channel_spread = max(numbers) - min(numbers)
 
-        # EPL branch rows are a clearly red shade.
         if red >= 90 and red >= green * 1.5 and red >= blue * 1.5:
             return "Hobart Branch"
 
-        # EPL service-contractor rows are neutral dark gray. Exclude near-black
-        # values because those usually indicate a failed/transparent lookup.
         if 30 <= brightness <= 110 and channel_spread <= 25:
             return "Service Contractor"
 
-        # Light-gray technician-truck rows and all unknown colors are ignored.
         return ""
 
     @staticmethod

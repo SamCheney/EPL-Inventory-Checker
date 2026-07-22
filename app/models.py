@@ -29,6 +29,8 @@ class AlternateStockLocation:
 @dataclass
 class PartResult:
     requested_part: str
+    current_part: str = ""
+    supersession_chain: list[str] = None
     item_id: str = ""
     description: str = ""
     stock_status: str = ""
@@ -39,5 +41,7 @@ class PartResult:
     error: str = ""
 
     def __post_init__(self) -> None:
+        if self.supersession_chain is None:
+            self.supersession_chain = []
         if self.alternate_stock is None:
             self.alternate_stock = []

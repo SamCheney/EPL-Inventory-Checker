@@ -2,6 +2,9 @@ import re
 
 VIP_URL = "https://vip.hobartservice.com/"
 
+APP_NAME = "EPL INVENTORY CHECKER"
+APP_VERSION = "1.0.0"
+
 SEARCH_BOX = "#ctl00_SearchBoxPlaceHolder_ItemIDTextBox"
 SEARCH_BUTTON = "#ctl00_SearchBoxPlaceHolder_SearchButton"
 
@@ -10,6 +13,7 @@ DESCRIPTION = "#ctl00_MainPlaceHolder_DataFormView_ItemNameLabel"
 STOCK_STATUS = "#ctl00_MainPlaceHolder_DataFormView_CostQuartileLabel"
 LEAD_TIME = "#ctl00_MainPlaceHolder_DataFormView_LeadTimeLabel"
 INVENTORY_TABLE = "#ctl00_MainPlaceHolder_RadGrid1_ctl00 tbody tr"
+REPLACED_BY = "#ctl00_MainPlaceHolder_DataFormView_AlternativeItemLink"
 
 LOGIN_USERNAME = "#ctl00_MainPlaceHolder_LoginBox_UserName"
 LOGIN_PASSWORD = "#ctl00_MainPlaceHolder_LoginBox_Password"
