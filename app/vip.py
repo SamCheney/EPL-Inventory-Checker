@@ -47,10 +47,7 @@ class EPLBatchWorker(QObject):
     def run(self) -> None:
         try:
             with sync_playwright() as p:
-                browser = p.chromium.launch(headless=False)
-                context = browser.new_context()
-                page = context.new_page()
-                page.goto(VIP_URL, wait_until="domcontentloaded")
+                browser, page = self._start_browser(p)
 
                 if page.locator(LOGIN_USERNAME).count():
                     if not self._auto_login(page):
@@ -89,6 +86,14 @@ class EPLBatchWorker(QObject):
             result = self.lookup_part(page, part)
             self.result_ready.emit(result)
             self.progress.emit(index, total)
+
+    def _start_browser(self, playwright):
+        browser = playwright.chromium.launch(headless=False)
+        context = browser.new_context()
+        page = context.new_page()
+        page.goto(VIP_URL, wait_until="domcontentloaded")
+
+        return browser, page
 
     def _auto_login(self, page) -> bool:
         username = keyring.get_password(CREDENTIAL_SERVICE, CREDENTIAL_USERNAME_KEY)
