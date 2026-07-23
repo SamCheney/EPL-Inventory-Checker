@@ -2,7 +2,7 @@
 ; MyAppVersion is synchronized automatically from app\constants.py by build_release.ps1.
 
 #define MyAppName "EPL Inventory Checker"
-#define MyAppVersion "1.0.2"
+#define MyAppVersion "1.0.3"
 #define MyAppPublisher "Sam Cheney"
 #define MyAppExeName "EPL Inventory Checker.exe"
 
@@ -36,5 +36,6 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
 
 

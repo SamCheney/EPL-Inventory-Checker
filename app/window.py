@@ -1,4 +1,4 @@
-import subprocess
+import os
 
 from pathlib import Path
 from typing import Optional
@@ -519,19 +519,13 @@ class MainWindow(QMainWindow):
                 update.download_url,
                 update.latest_version
             )
-            
-            subprocess.Popen(
-                [
-                    "cmd",
-                    "/c",
-                    (
-                        'timeout /t 1 /nobreak > nul '
-                        f'& start "" "{installer_path}"'
-                    ),
-                ],
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
 
+            if not installer_path.exists():
+                raise FileNotFoundError(
+                    f"The downloaded installer was not found:\n{installer_path}"
+                )
+
+            os.startfile(str(installer_path))
             QApplication.quit()
 
         except Exception as exc:
