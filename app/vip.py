@@ -4,7 +4,7 @@ import re
 
 import keyring
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QThread, Signal
 from playwright.sync_api import (
     TimeoutError as PlaywrightTimeoutError,
     sync_playwright,
@@ -52,19 +52,41 @@ class EPLSession:
             wait_until="domcontentloaded",
         )
 
+    def close(self):
+        if self.browser is not None:
+            self.browser.close()
+            self.browser = None
+
+        if self.playwright is not None:
+            self.playwright.stop()
+            self.playwright = None
+
+        self.context = None
+        self.page = None
+
 class EPLBatchWorker(QObject):
     status = Signal(str)
     progress = Signal(int, int)
     result_ready = Signal(object)
     batch_complete = Signal()
+    shutdown_complete = Signal()
 
     MAX_SUPERSESSION_HOPS = 10
 
-    def __init__(self, parts: list[str], organization: str):
+    def __init__(
+        self,
+        parts: list[str] | None = None,
+        organization: str = "",
+    ):
         super().__init__()
-        self.parts = parts
+        self.parts = parts or []
         self.organization = organization
         self.session = EPLSession()
+
+    def start_batch(self, parts: list[str], organization: str) -> None:
+        self.parts = parts
+        self.organization = organization
+        self.run()
 
     def run(self) -> None:
         try:
@@ -73,8 +95,7 @@ class EPLBatchWorker(QObject):
             self._prepare_epl_page(self.session.page)
             self._process_parts(self.session.page)
 
-            self.session.browser.close()
-            self.session.playwright.stop()
+            self.session.close()
 
             # self.browser.close()
             # self.playwright.stop()
@@ -85,6 +106,13 @@ class EPLBatchWorker(QObject):
             )
         finally:
             self.batch_complete.emit()
+
+    def shutdown(self) -> None:
+        try:
+            self.session.close()
+        finally:
+            self.shutdown_complete.emit()
+            QThread.currentThread().quit()
 
     def _process_parts(self, page) -> None:
         total = len(self.parts)

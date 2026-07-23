@@ -8,7 +8,7 @@ from app.updater import UpdateChecker
 from app.constants import APP_NAME, APP_VERSION
 
 import keyring
-from PySide6.QtCore import QSettings, QThread, Qt
+from PySide6.QtCore import QSettings, QThread, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QDialog,
@@ -48,6 +48,7 @@ from app.vip import EPLBatchWorker
 
 
 class MainWindow(QMainWindow):
+    
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
@@ -56,6 +57,8 @@ class MainWindow(QMainWindow):
         self.parts_by_key: dict[str, PartInput] = {}
         self.thread: Optional[QThread] = None
         self.worker: Optional[EPLBatchWorker] = None
+        
+
         self.result_row_by_part: dict[str, int] = {}
 
         self.manual_input = QPlainTextEdit()
@@ -144,7 +147,7 @@ class MainWindow(QMainWindow):
         splitter.setSizes([470, 680])
 
         self.setCentralWidget(splitter)
-
+        
     def save_login(self) -> None:
         dialog = LoginDialog(self)
         if dialog.exec() != QDialog.Accepted:
@@ -339,6 +342,8 @@ class MainWindow(QMainWindow):
         self.worker.batch_complete.connect(self.batch_finished)
         self.worker.batch_complete.connect(self.thread.quit)
         self.worker.batch_complete.connect(self.worker.deleteLater)
+
+        self.thread.finished.connect(self.worker_thread_finished)
         self.thread.finished.connect(self.thread.deleteLater)
 
         self.thread.start()
@@ -436,6 +441,22 @@ class MainWindow(QMainWindow):
     def batch_finished(self) -> None:
         self.set_controls_enabled(True)
         self.status_label.setText("Batch lookup finished.")
+
+    def worker_thread_finished(self) -> None:
+        self.thread = None
+        self.worker = None
+
+    def closeEvent(self, event) -> None:
+        if self.thread is not None:
+            try:
+                if self.thread.isRunning():
+                    self.thread.quit()
+                    self.thread.wait()
+            except RuntimeError:
+                # Qt already deleted the underlying QThread object.
+                pass
+
+        event.accept()
 
     def set_controls_enabled(self, enabled: bool) -> None:
         self.add_attachment_button.setEnabled(enabled)
