@@ -71,7 +71,7 @@ class EPLBatchWorker(QObject):
             self.progress.emit(index, total)
 
     def _start_browser(self, playwright):
-        browser = playwright.chromium.launch(headless=False)
+        browser = playwright.chromium.launch(headless=True)
         context = browser.new_context()
         page = context.new_page()
         page.goto(VIP_URL, wait_until="domcontentloaded")
