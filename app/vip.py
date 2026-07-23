@@ -35,7 +35,7 @@ class EPLBatchWorker(QObject):
     status = Signal(str)
     progress = Signal(int, int)
     result_ready = Signal(object)
-    finished = Signal()
+    batch_complete = Signal()
 
     MAX_SUPERSESSION_HOPS = 10
 
@@ -59,7 +59,7 @@ class EPLBatchWorker(QObject):
                 PartResult(requested_part="", error=f"Browser session failed: {exc}")
             )
         finally:
-            self.finished.emit()
+            self.batch_complete.emit()
 
     def _process_parts(self, page) -> None:
         total = len(self.parts)

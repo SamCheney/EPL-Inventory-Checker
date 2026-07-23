@@ -336,9 +336,9 @@ class MainWindow(QMainWindow):
         self.worker.status.connect(self.status_label.setText)
         self.worker.progress.connect(self.update_progress)
         self.worker.result_ready.connect(self.add_result)
-        self.worker.finished.connect(self.batch_finished)
-        self.worker.finished.connect(self.thread.quit)
-        self.worker.finished.connect(self.worker.deleteLater)
+        self.worker.batch_complete.connect(self.batch_finished)
+        self.worker.batch_complete.connect(self.thread.quit)
+        self.worker.batch_complete.connect(self.worker.deleteLater)
         self.thread.finished.connect(self.thread.deleteLater)
 
         self.thread.start()
