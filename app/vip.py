@@ -70,12 +70,7 @@ class EPLBatchWorker(QObject):
 
                 page.locator(SEARCH_BOX).wait_for(state="visible", timeout=300_000)
 
-                total = len(self.parts)
-                for index, part in enumerate(self.parts, start=1):
-                    self.status.emit(f"Searching {part} ({index} of {total})...")
-                    result = self.lookup_part(page, part)
-                    self.result_ready.emit(result)
-                    self.progress.emit(index, total)
+                self._process_parts(page)
 
                 browser.close()
 
@@ -85,6 +80,15 @@ class EPLBatchWorker(QObject):
             )
         finally:
             self.finished.emit()
+
+    def _process_parts(self, page) -> None:
+        total = len(self.parts)
+
+        for index, part in enumerate(self.parts, start=1):
+            self.status.emit(f"Searching {part} ({index} of {total})...")
+            result = self.lookup_part(page, part)
+            self.result_ready.emit(result)
+            self.progress.emit(index, total)
 
     def _auto_login(self, page) -> bool:
         username = keyring.get_password(CREDENTIAL_SERVICE, CREDENTIAL_USERNAME_KEY)
