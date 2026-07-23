@@ -49,24 +49,7 @@ class EPLBatchWorker(QObject):
             with sync_playwright() as p:
                 browser, page = self._start_browser(p)
 
-                if page.locator(LOGIN_USERNAME).count():
-                    if not self._auto_login(page):
-                        raise RuntimeError(
-                            "No saved VIP credentials were found. "
-                            "Please save your login information before searching."
-                        )
-
-                    self.status.emit(
-                        "Signed into VIP. Opening Enterprise Parts Locator..."
-                    )
-
-                try:
-                    page.locator(SEARCH_BOX).wait_for(state="visible", timeout=5_000)
-                except PlaywrightTimeoutError:
-                    self._open_epl_after_login(page)
-
-                page.locator(SEARCH_BOX).wait_for(state="visible", timeout=300_000)
-
+                self._prepare_epl_page(page)
                 self._process_parts(page)
 
                 browser.close()
@@ -94,6 +77,26 @@ class EPLBatchWorker(QObject):
         page.goto(VIP_URL, wait_until="domcontentloaded")
 
         return browser, page
+
+    def _prepare_epl_page(self, page) -> None:
+        if page.locator(LOGIN_USERNAME).count():
+            if not self._auto_login(page):
+                raise RuntimeError(
+                    "No saved VIP credentials were found. "
+                    "Please save your login information before searching."
+                )
+
+            self.status.emit(
+                "Signed into VIP. Opening Enterprise Parts Locator..."
+            )
+
+        try:
+            page.locator(SEARCH_BOX).wait_for(
+                state="visible",
+                timeout=5_000,
+            )
+        except PlaywrightTimeoutError:
+            self._open_epl_after_login(page)
 
     def _auto_login(self, page) -> bool:
         username = keyring.get_password(CREDENTIAL_SERVICE, CREDENTIAL_USERNAME_KEY)
