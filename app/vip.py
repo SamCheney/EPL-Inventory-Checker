@@ -53,15 +53,15 @@ class EPLBatchWorker(QObject):
                 page.goto(VIP_URL, wait_until="domcontentloaded")
 
                 if page.locator(LOGIN_USERNAME).count():
-                    if self._auto_login(page):
-                        self.status.emit(
-                            "Signed into VIP. Opening Enterprise Parts Locator..."
+                    if not self._auto_login(page):
+                        raise RuntimeError(
+                            "No saved VIP credentials were found. "
+                            "Please save your login information before searching."
                         )
-                    else:
-                        self.status.emit(
-                            "No saved login was found. Sign in manually; "
-                            "the program will continue afterward."
-                        )
+
+                    self.status.emit(
+                        "Signed into VIP. Opening Enterprise Parts Locator..."
+                    )
 
                 try:
                     page.locator(SEARCH_BOX).wait_for(state="visible", timeout=5_000)
