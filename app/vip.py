@@ -1,11 +1,16 @@
 import os
+import sys
+from pathlib import Path
 
 import re
 
 import keyring
 
-from PySide6.QtCore import QObject, QThread, Signal
+from queue import Queue
+
+from PySide6.QtCore import QObject, Signal
 from playwright.sync_api import (
+    Error as PlaywrightError,
     TimeoutError as PlaywrightTimeoutError,
     sync_playwright,
 )
@@ -30,6 +35,12 @@ from app.constants import (
 )
 from app.models import AlternateStockLocation, PartResult
 
+def configure_playwright_browser_path() -> None:
+    if getattr(sys, "frozen", False):
+        app_directory = Path(sys.executable).resolve().parent
+        browser_directory = app_directory / "ms-playwright"
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(browser_directory)
+
 class EPLSession:
     def __init__(self):
         self.playwright = None
@@ -40,6 +51,8 @@ class EPLSession:
     def _start_browser(self):
         if self.page is not None:
             return
+
+        configure_playwright_browser_path()
 
         self.playwright = sync_playwright().start()
 
@@ -69,7 +82,7 @@ class EPLBatchWorker(QObject):
     progress = Signal(int, int)
     result_ready = Signal(object)
     batch_complete = Signal()
-    shutdown_complete = Signal()
+    worker_stopped = Signal()
 
     MAX_SUPERSESSION_HOPS = 10
 
@@ -83,43 +96,99 @@ class EPLBatchWorker(QObject):
         self.organization = organization
         self.session = EPLSession()
 
-    def start_batch(self, parts: list[str], organization: str) -> None:
-        self.parts = parts
-        self.organization = organization
-        self.run()
+        self._batch_queue: Queue[tuple[list[str], str] | None] = Queue()
+        self._running = True
 
-    def run(self) -> None:
+    def submit_batch(
+        self,
+        parts: list[str],
+        organization: str,
+    ) -> None:
+        self._batch_queue.put((parts, organization))
+
+
+    def request_stop(self) -> None:
+        self._batch_queue.put(None)
+
+
+    def run_persistent(self) -> None:
         try:
-            self.session._start_browser()
+            while self._running:
+                self.status.emit("Waiting for next batch...")
 
-            self._prepare_epl_page(self.session.page)
-            self._process_parts(self.session.page)
+                batch = self._batch_queue.get()
 
-            self.session.close()
+                self.status.emit("Batch received.")
 
-            # self.browser.close()
-            # self.playwright.stop()
+                if batch is None:
+                    self._running = False
+                    break
 
-        except Exception as exc:
-            self.result_ready.emit(
-                PartResult(requested_part="", error=f"Browser session failed: {exc}")
-            )
+                self.parts, self.organization = batch
+
+                self.status.emit(
+                    f"Processing {len(self.parts)} part(s)..."
+                )
+
+                try:
+                    if self.session.page is None:
+                        self.session._start_browser()
+                        self._prepare_epl_page(self.session.page)
+
+                    self._process_parts(self.session.page)
+
+                except Exception as exc:
+                    self.result_ready.emit(
+                        PartResult(
+                            requested_part="",
+                            error=f"Browser session failed: {exc}",
+                        )
+                    )
+
+                    # Discard a broken browser session so the next batch
+                    # can start a fresh one.
+                    self.session.close()
+
+                finally:
+                    self.batch_complete.emit()
+
         finally:
-            self.batch_complete.emit()
-
-    def shutdown(self) -> None:
-        try:
             self.session.close()
-        finally:
-            self.shutdown_complete.emit()
-            QThread.currentThread().quit()
+            self.worker_stopped.emit()
 
     def _process_parts(self, page) -> None:
         total = len(self.parts)
 
         for index, part in enumerate(self.parts, start=1):
             self.status.emit(f"Searching {part} ({index} of {total})...")
-            result = self.lookup_part(page, part)
+
+            try:
+                result = self.lookup_part(self.session.page, part)
+
+            except PlaywrightError as first_error:
+                self.status.emit(
+                    f"Browser connection failed while searching {part}. "
+                    "Restarting the browser and retrying once..."
+                )
+
+                try:
+                    self.session.close()
+                    self.session._start_browser()
+                    self._prepare_epl_page(self.session.page)
+
+                    result = self.lookup_part(self.session.page, part)
+
+                except Exception as retry_error:
+                    self.session.close()
+
+                    result = PartResult(
+                        requested_part=part,
+                        error=(
+                        "The browser failed while searching this part and "
+                        f"the automatic retry was unsuccessful: {retry_error}"
+                        ),
+                    )
+
             self.result_ready.emit(result)
             self.progress.emit(index, total)
 
@@ -234,6 +303,9 @@ class EPLBatchWorker(QObject):
                 "The supersession chain exceeded "
                 f"{self.MAX_SUPERSESSION_HOPS} replacements."
             )
+
+        except PlaywrightError:
+            raise
 
         except Exception as exc:
             result.current_part = current_part

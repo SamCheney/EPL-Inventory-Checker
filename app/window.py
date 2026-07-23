@@ -55,8 +55,8 @@ class MainWindow(QMainWindow):
         self.resize(1150, 720)
 
         self.parts_by_key: dict[str, PartInput] = {}
-        self.thread: Optional[QThread] = None
-        self.worker: Optional[EPLBatchWorker] = None
+        self.persistent_thread: Optional[QThread] = None
+        self.persistent_worker: Optional[EPLBatchWorker] = None
         
 
         self.result_row_by_part: dict[str, int] = {}
@@ -95,13 +95,12 @@ class MainWindow(QMainWindow):
         self.progress.setValue(0)
         self.status_label = QLabel("Ready")
 
-        self.results_table = QTableWidget(0, 10)
+        self.results_table = QTableWidget(0, 9)
         self.results_table.setHorizontalHeaderLabels(
             [
                 "Status",
                 "Requested Part",
                 "Current Part",
-                "EPL Item ID",
                 "Description",
                 "Stock Status",
                 "Lead Time",
@@ -147,6 +146,33 @@ class MainWindow(QMainWindow):
         splitter.setSizes([470, 680])
 
         self.setCentralWidget(splitter)
+
+        self.persistent_thread = QThread()
+        self.persistent_worker = EPLBatchWorker()
+
+        self.persistent_worker.moveToThread(self.persistent_thread)
+
+        self.persistent_thread.started.connect(
+            self.persistent_worker.run_persistent
+        )
+
+        self.persistent_worker.status.connect(self.status_label.setText)
+        self.persistent_worker.progress.connect(self.update_progress)
+        self.persistent_worker.result_ready.connect(self.add_result)
+        self.persistent_worker.batch_complete.connect(self.batch_finished)
+
+        self.persistent_worker.worker_stopped.connect(
+            self.persistent_thread.quit
+        )
+        self.persistent_worker.worker_stopped.connect(
+            self.persistent_worker.deleteLater
+        )
+
+        self.persistent_thread.finished.connect(
+            self.persistent_thread.deleteLater
+        )
+
+        self.persistent_thread.start()
         
     def save_login(self) -> None:
         dialog = LoginDialog(self)
@@ -331,22 +357,16 @@ class MainWindow(QMainWindow):
         settings = QSettings("EPL Inventory Checker", "EPL Inventory Checker")
         organization = settings.value(SETTINGS_ORGANIZATION_KEY, "FEGNA")
 
-        self.thread = QThread()
-        self.worker = EPLBatchWorker(parts, organization)
-        self.worker.moveToThread(self.thread)
+        if self.persistent_worker is None:
+            QMessageBox.critical(
+                self,
+                "Worker Error",
+                "The persistent EPL worker is not available.",
+            )
+            self.set_controls_enabled(True)
+            return
 
-        self.thread.started.connect(self.worker.run)
-        self.worker.status.connect(self.status_label.setText)
-        self.worker.progress.connect(self.update_progress)
-        self.worker.result_ready.connect(self.add_result)
-        self.worker.batch_complete.connect(self.batch_finished)
-        self.worker.batch_complete.connect(self.thread.quit)
-        self.worker.batch_complete.connect(self.worker.deleteLater)
-
-        self.thread.finished.connect(self.worker_thread_finished)
-        self.thread.finished.connect(self.thread.deleteLater)
-
-        self.thread.start()
+        self.persistent_worker.submit_batch(parts, organization)
 
     def update_progress(self, current: int, total: int) -> None:
         self.progress.setMaximum(total)
@@ -379,7 +399,6 @@ class MainWindow(QMainWindow):
         values = [
             result.requested_part,
             result.current_part or result.item_id or result.requested_part,
-            result.item_id,
             result.description,
             result.stock_status,
             result.lead_time,
@@ -389,7 +408,7 @@ class MainWindow(QMainWindow):
 
         for column, value in enumerate(values, start=1):
             item = QTableWidgetItem(value)
-            if result.error and column == 4:
+            if result.error and column == 3:
                 item.setText(f"ERROR: {result.error}")
             self.results_table.setItem(row, column, item)
 
@@ -409,7 +428,7 @@ class MainWindow(QMainWindow):
                 lambda checked=False, current_result=result:
                     self.show_alternate_stock(current_result)
             )
-            self.results_table.setCellWidget(row, 9, button)
+            self.results_table.setCellWidget(row, 8, button)
 
         elif piqua_quantity <= 0 and not result.error:
             out_of_stock_item = QTableWidgetItem("OUT OF STOCK")
@@ -417,7 +436,7 @@ class MainWindow(QMainWindow):
                 "Piqua has zero or negative stock and no other qualifying "
                 "location shows positive Available Physical inventory."
             )
-            self.results_table.setItem(row, 9, out_of_stock_item)
+            self.results_table.setItem(row, 8, out_of_stock_item)
 
             out_of_stock_background = QColor(255, 205, 205)
             for column in range(1, self.results_table.columnCount()):
@@ -428,7 +447,7 @@ class MainWindow(QMainWindow):
                 item.setBackground(out_of_stock_background)
 
         else:
-            self.results_table.setItem(row, 9, QTableWidgetItem("Piqua stocked"))
+            self.results_table.setItem(row, 8, QTableWidgetItem("Piqua stocked"))
 
     def show_alternate_stock(self, result: PartResult) -> None:
         dialog = AlternateStockDialog(
@@ -442,18 +461,17 @@ class MainWindow(QMainWindow):
         self.set_controls_enabled(True)
         self.status_label.setText("Batch lookup finished.")
 
-    def worker_thread_finished(self) -> None:
-        self.thread = None
-        self.worker = None
-
     def closeEvent(self, event) -> None:
-        if self.thread is not None:
+
+        if self.persistent_worker is not None:
+            self.persistent_worker.request_stop()
+
+        if self.persistent_thread is not None:
             try:
-                if self.thread.isRunning():
-                    self.thread.quit()
-                    self.thread.wait()
+                if self.persistent_thread.isRunning():
+                    self.persistent_thread.quit()
+                    self.persistent_thread.wait()
             except RuntimeError:
-                # Qt already deleted the underlying QThread object.
                 pass
 
         event.accept()
