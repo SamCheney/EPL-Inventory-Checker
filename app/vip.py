@@ -30,6 +30,27 @@ from app.constants import (
 )
 from app.models import AlternateStockLocation, PartResult
 
+class EPLSession:
+    def __init__(self):
+        self.playwright = None
+        self.browser = None
+        self.context = None
+        self.page = None
+
+    def _start_browser(self):
+        if self.page is not None:
+            return
+
+        self.playwright = sync_playwright().start()
+
+        self.browser = self.playwright.chromium.launch(headless=True)
+        self.context = self.browser.new_context()
+        self.page = self.context.new_page()
+
+        self.page.goto(
+            VIP_URL,
+            wait_until="domcontentloaded",
+        )
 
 class EPLBatchWorker(QObject):
     status = Signal(str)
@@ -43,16 +64,20 @@ class EPLBatchWorker(QObject):
         super().__init__()
         self.parts = parts
         self.organization = organization
+        self.session = EPLSession()
 
     def run(self) -> None:
         try:
-            with sync_playwright() as p:
-                browser, page = self._start_browser(p)
+            self.session._start_browser()
 
-                self._prepare_epl_page(page)
-                self._process_parts(page)
+            self._prepare_epl_page(self.session.page)
+            self._process_parts(self.session.page)
 
-                browser.close()
+            self.session.browser.close()
+            self.session.playwright.stop()
+
+            # self.browser.close()
+            # self.playwright.stop()
 
         except Exception as exc:
             self.result_ready.emit(
@@ -69,14 +94,6 @@ class EPLBatchWorker(QObject):
             result = self.lookup_part(page, part)
             self.result_ready.emit(result)
             self.progress.emit(index, total)
-
-    def _start_browser(self, playwright):
-        browser = playwright.chromium.launch(headless=True)
-        context = browser.new_context()
-        page = context.new_page()
-        page.goto(VIP_URL, wait_until="domcontentloaded")
-
-        return browser, page
 
     def _prepare_epl_page(self, page) -> None:
         if page.locator(LOGIN_USERNAME).count():
